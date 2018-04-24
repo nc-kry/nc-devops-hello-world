@@ -1,0 +1,108 @@
+buildscript {
+    repositories {
+        mavenCentral()
+        jcenter()
+        maven {
+            url "https://plugins.gradle.org/m2/"
+        }
+        maven {
+            url "https://jitpack.io"
+        }
+    }
+    dependencies {
+        classpath 'org.springframework.boot:spring-boot-gradle-plugin:2.0.0.RELEASE'
+        classpath 'org.jfrog.buildinfo:build-info-extractor-gradle:latest.release'
+        classpath 'com.bmuschko:gradle-docker-plugin:3.2.5'
+		classpath 'ch.netzwerg:gradle-release-plugin:1.2.1'
+    }
+}
+
+allprojects {
+    repositories {
+        maven {
+            url "https://plugins.gradle.org/m2/"
+        }
+        maven {
+            url "https://jitpack.io"
+        }
+    }
+}
+
+apply plugin: 'java'
+apply plugin: 'base'
+apply plugin: 'org.springframework.boot'
+apply plugin: 'io.spring.dependency-management'
+apply plugin: 'maven'
+apply plugin: 'com.jfrog.artifactory'
+apply plugin: 'maven-publish'
+apply plugin: 'com.bmuschko.docker-remote-api'
+apply plugin: 'com.bmuschko.docker-java-application'
+apply plugin: 'ch.netzwerg.release'
+
+import com.bmuschko.gradle.docker.tasks.image.*
+
+group = 'com.netcompany.devops'
+version = new File('version.txt').text
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+task createDockerfile(type: Dockerfile) {
+    dependsOn build
+    destFile = project.file("${buildDir}/Dockerfile")
+    def jarName = "${project.name}-${version}.jar"
+
+    from 'alpine:latest'
+    entryPoint("java", "-jar", jarName)
+    runCommand "apk --update add openjdk8-jre"
+    addFile("/libs/${jarName}", jarName)
+    exposePort 8080
+}
+
+task buildImage(type: DockerBuildImage) {
+    dependsOn createDockerfile
+    inputDir = createDockerfile.destFile.parentFile
+    tag = "hello-from-netcompany"
+}
+
+task saveImage(type: DockerSaveImage) {
+    dependsOn buildImage
+    buildImage.getImageId()
+    repository = "hello-from-netcompany"
+    destFile = project.file("${buildDir}/docker/${project.name}-${version}.tar")
+}
+
+artifactory {
+    contextUrl = 'http://localhost:8081/artifactory/'
+    publish {
+        repository {
+            repoKey = 'example-repo-local'
+            username = 'devops'
+            password = 'devops'
+            maven = true
+        }
+        defaults {
+            publications('mavenJava')
+        }
+    }
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+            artifact project.file("${buildDir}/docker/${project.name}-${version}.tar")
+        }
+    }
+}
+
+dependencies {
+    compile 'com.github.project-aries:docker-java-shaded:master'
+    compile 'com.github.jitpack:gradle-simple:master'
+    compile 'org.springframework.boot:spring-boot-starter-data-rest'
+    compile 'org.springframework.boot:spring-boot-starter-web'
+    testCompile 'org.springframework.boot:spring-boot-starter-test'
+}
+
+release {
+	push = false
+}
